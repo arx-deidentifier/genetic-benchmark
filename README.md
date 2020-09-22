@@ -1,10 +1,10 @@
 # genetic-benchmark
-Benchmark of ARX's genetic algorithm and further approaches for anonymizing high-dimensional data
+Benchmark of ARX's genetic algorithm and further approaches for anonymizing high-dimensional data.
 
 Java
 ------
-The Java code contained in this repository is used to run the Benchmarks. The benchmark results are provided as .csv-file.
+The Java code contained in this repository can be used to run the Benchmarks. The benchmark results are provided as CSV-files.
 
 Python
 ------
-The Python code is used to evalute the .csv-files (e.g. by averaging repetitive benchmark runs) and to visualzie the data.
+The Python code can be used to analyze the CSV-files (e.g. by averaging repetitive benchmark runs) and to visualize the results.
