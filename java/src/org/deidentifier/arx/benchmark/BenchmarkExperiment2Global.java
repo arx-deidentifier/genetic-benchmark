@@ -24,25 +24,36 @@ import org.deidentifier.arx.ARXConfiguration.AnonymizationAlgorithm;
 import org.deidentifier.arx.benchmark.BenchmarkSetup.BenchmarkDataset;
 
 /**
- * @author Thierry
- *
- *         Used for execute Benchmarks on high dim datasets with a continuously
- *         tracked utility improvement over time.
- *
+ * Benchmark class defining tests for high-dimensional datasets with global transformation.
+ * The utility improvement is tracked continuously over time.
+ * 
+ * @author Thierry Meurers
  */
 public class BenchmarkExperiment2Global extends AbstractBenchmark {
 
+    /**
+     * Constructor
+     * 
+     * @param fileName
+     */
     BenchmarkExperiment2Global(String fileName) {
         super(fileName, true, true);
     }
 
+    /**
+     * Entry point.
+     * 
+     * @param args the arguments
+     */
     public static void main(String args[]) throws IOException {
         new BenchmarkExperiment2Global("results/Experiment2_kAnon_final.csv").start();
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void generateTestConfigurations(List<TestConfiguration> testConfigs) {
-
         
         // Definition of properties that will be varied for the Benchmark
         AnonymizationAlgorithm[] algorithms = new AnonymizationAlgorithm[] { AnonymizationAlgorithm.BEST_EFFORT_BOTTOM_UP,
@@ -53,8 +64,6 @@ public class BenchmarkExperiment2Global extends AbstractBenchmark {
         BenchmarkDataset[] datasets = new BenchmarkDataset[] { BenchmarkDataset.CREDITCARD,
                                                                BenchmarkDataset.MACH2019,
                                                                BenchmarkDataset.SS13ACS };
-        
-        // AnonymizationAlgorithm[] algorithms = new AnonymizationAlgorithm[] {AnonymizationAlgorithm.BEST_EFFORT_GENETIC };
 
         // Number of testruns
         int testRuns = 6;
@@ -88,5 +97,4 @@ public class BenchmarkExperiment2Global extends AbstractBenchmark {
             }
         }
     }
-
 }

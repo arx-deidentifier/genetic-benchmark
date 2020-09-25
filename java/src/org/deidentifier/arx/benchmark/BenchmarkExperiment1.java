@@ -23,17 +23,35 @@ import java.util.List;
 import org.deidentifier.arx.ARXConfiguration.AnonymizationAlgorithm;
 import org.deidentifier.arx.benchmark.BenchmarkSetup.BenchmarkDataset;
 
-
+/**
+ * Benchmark class defining tests for low-dimensional datasets with global transformation.
+ * The runtime required for finding an optimal solution is measured.
+ * 
+ * @author Thierry Meurers
+ */
 public class BenchmarkExperiment1 extends AbstractBenchmark{
 
+    /**
+     * Constructor
+     * 
+     * @param fileName
+     */
     BenchmarkExperiment1(String fileName) {
         super(fileName, true, false);
     }
     
+    /**
+     * Entry point.
+     * 
+     * @param args the arguments
+     */
     public static void main(String args[]) throws IOException {
         new BenchmarkExperiment1("results/Experiment1_kAnon.csv").start();
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void generateTestConfigurations(List<TestConfiguration> testConfigs) {
                 
@@ -64,10 +82,8 @@ public class BenchmarkExperiment1 extends AbstractBenchmark{
                     testConfig.crossoverFraction = 0.4;
                     testConfig.mutationProbability = 0.05;
                     
-                    
                     testConfig.limitByOptimalLoss = true;
                     testConfig.timeLimit = 300000;
-                    
 
                     if (testRun == 0) testConfig.writeToFile = false;
 

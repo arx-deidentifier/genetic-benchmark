@@ -38,6 +38,106 @@ import org.deidentifier.arx.metric.InformationLossWithBound;
  */
 public abstract class AbstractAlgorithm {
 
+    /**
+     * Simple data structure used to save the best transformation available after a certain time.
+     * Apart from the transformation and the time it stores the internal utility score of the transformation 
+     * (the value that is optimized during the anonymization) as well as the external utility (measured by
+     * applying the transformation to the dataset).
+     * 
+     * @author Thierry Meurers
+     *
+     */
+    public class TimeUtilityTuple{
+        
+        /** Passed time */
+        private long time;
+        
+        /** Internal utility */
+        private double internalUtility;
+        
+        /** External utility */
+        private double externalUtility;
+        
+        /** Transformation */  
+        private Transformation<?> transformation;
+        
+        /**
+         * Constructor
+         * 
+         * @param time
+         * @param internalUtility
+         * @param transformation
+         */
+        TimeUtilityTuple(long time, double internalUtility, Transformation<?> transformation){
+            this.time = time;
+            this.internalUtility = internalUtility;
+            this.transformation = transformation;
+        }
+        
+        /**
+         * Returns the external utility
+         * 
+         * @return
+         */
+        public double getExternalUtility() {
+            return externalUtility;
+        }
+        
+        /**
+         * Returns the internal utility
+         * 
+         * @return
+         */
+        public double getInternalUtility() {
+            return internalUtility;
+        }
+        
+        /**
+         * Returns the passed time
+         * 
+         * @return
+         */
+        public long getTime() {
+            return time;
+        }
+        
+        /**
+         * Returns the transformation
+         * 
+         * @return
+         */
+        public Transformation<?> getTransfomration() {
+            return transformation;
+        }
+        
+        /**
+         * Sets the external utility
+         * 
+         * @return
+         */
+        public void setExternalUtility(double externalUtility) {
+            this.externalUtility = externalUtility;
+        }
+        
+        /**
+         * Print simple output to ease debugging.
+         */
+        @Override
+        public String toString() {
+            return "Time: " + time + "/ Internal Utility: " + internalUtility;
+        }
+        
+    }
+
+    /** Limit to aboard run */
+    public static double            lossLimit              = -1;
+
+    private static List<TimeUtilityTuple>  trackedOptimums        = new ArrayList<TimeUtilityTuple>();
+
+    public static List<TimeUtilityTuple> getTrackedOptimums(){
+        return trackedOptimums;
+    }
+
     /** The optimal transformation. */
     private Transformation<?>       globalOptimum          = null;
 
@@ -52,22 +152,17 @@ public abstract class AbstractAlgorithm {
 
     /** The lattice. */
     protected SolutionSpace<?>      solutionSpace          = null;
-
+    
     /** Time limit */
     private final int               timeLimit;
+    
+    
 
     /** The start time */
     private long                    timeStart;
 
     /** The number of checks */
     private final int               checkLimit;
-
-    /** Limit to aboard run */
-    public static double            lossLimit              = -1;
-    
-    private static List<TimeUtilityTuple>  trackedOptimums        = new ArrayList<TimeUtilityTuple>();
-    
-    
 
     /**
      * Initializes the algorithm
@@ -91,6 +186,27 @@ public abstract class AbstractAlgorithm {
             throw new IllegalArgumentException("Invalid step limit. Must be greater than zero."); 
         }
     }
+    
+    /**
+     * Determine information loss implied by the given transformation if it can be
+     * used for estimating minimum and maximum information loss for tagged nodes.
+     *
+     * @param transformation
+     */
+    protected void computeUtilityForMonotonicMetrics(Transformation<?> transformation) {
+        if (checker.getConfiguration().getMonotonicityOfUtility() == Monotonicity.FULL &&
+            transformation.getInformationLoss() == null) {
+
+            // Independent evaluation or check
+            if (checker.getMetric().isIndependent()) {
+                InformationLossWithBound<?> loss = checker.getMetric().getInformationLoss(transformation, (HashGroupify)null);
+                transformation.setInformationLoss(loss.getInformationLoss());
+                transformation.setLowerBound(loss.getLowerBound());
+            } else {
+                transformation.setChecked(checker.check(transformation, true, ScoreType.INFORMATION_LOSS));
+            }
+        }
+    }
 
     /**
      * Return stuff for progress monitoring
@@ -107,7 +223,7 @@ public abstract class AbstractAlgorithm {
     public int getCheckLimit() {
         return checkLimit;
     }
-    
+
     /**
      * Returns the global optimum.
      *
@@ -134,42 +250,6 @@ public abstract class AbstractAlgorithm {
     }
 
     /**
-     * Sets a listener
-     * @param listener
-     */
-    public void setListener(ARXListener listener) {
-        this.listener = listener;
-    }
-
-    /**
-     * Implement this method in order to provide a new algorithm.
-     * 
-     * @return Whether the result is optimal
-     */
-    public abstract boolean traverse();
-
-    /**
-     * Determine information loss implied by the given transformation if it can be
-     * used for estimating minimum and maximum information loss for tagged nodes.
-     *
-     * @param transformation
-     */
-    protected void computeUtilityForMonotonicMetrics(Transformation<?> transformation) {
-        if (checker.getConfiguration().getMonotonicityOfUtility() == Monotonicity.FULL &&
-            transformation.getInformationLoss() == null) {
-
-            // Independent evaluation or check
-            if (checker.getMetric().isIndependent()) {
-                InformationLossWithBound<?> loss = checker.getMetric().getInformationLoss(transformation, (HashGroupify)null);
-                transformation.setInformationLoss(loss.getInformationLoss());
-                transformation.setLowerBound(loss.getLowerBound());
-            } else {
-                transformation.setChecked(checker.check(transformation, true, ScoreType.INFORMATION_LOSS));
-            }
-        }
-    }
-
-    /**
      * Returns whether we have exceeded the allowed number of steps or time.
      * @return
      */
@@ -187,6 +267,14 @@ public abstract class AbstractAlgorithm {
         if (this.listener != null) {
             this.listener.progress(progress);
         }
+    }
+
+    /**
+     * Sets a listener
+     * @param listener
+     */
+    public void setListener(ARXListener listener) {
+        this.listener = listener;
     }
 
     /**
@@ -212,7 +300,7 @@ public abstract class AbstractAlgorithm {
             //System.out.println(trackedOptimums.get(trackedOptimums.size()-1));
         }
     }
-
+    
     /**
      * Track progress from limits
      */
@@ -230,47 +318,10 @@ public abstract class AbstractAlgorithm {
         progress(Math.min(1.0d, Math.max(algorithmProgress, Math.max(progressSteps, progressTime))));
     }
     
-    public static List<TimeUtilityTuple> getTrackedOptimums(){
-        return trackedOptimums;
-    }
-    
-    public class TimeUtilityTuple{
-        
-        private long time;
-        private double internalUtility;
-        private double externalUtility;
-        private Transformation<?> transformation;
-        
-        TimeUtilityTuple(long time, double internalUtility, Transformation<?> transformation){
-            this.time = time;
-            this.internalUtility = internalUtility;
-            this.transformation = transformation;
-        }
-        
-        public long getTime() {
-            return time;
-        }
-        
-        public double getInternalUtility() {
-            return internalUtility;
-        }
-        
-        public double getExternalUtility() {
-            return externalUtility;
-        }
-        
-        public void setExternalUtility(double externalUtility) {
-            this.externalUtility = externalUtility;
-        }
-        
-        public Transformation<?> getTransfomration() {
-            return transformation;
-        }
-        
-        @Override
-        public String toString() {
-            return "Time: " + time + "/ Internal Utility: " + internalUtility;
-        }
-        
-    }
+    /**
+     * Implement this method in order to provide a new algorithm.
+     * 
+     * @return Whether the result is optimal
+     */
+    public abstract boolean traverse();
 }

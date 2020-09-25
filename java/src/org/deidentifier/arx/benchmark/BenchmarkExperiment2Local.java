@@ -24,23 +24,34 @@ import org.deidentifier.arx.ARXConfiguration.AnonymizationAlgorithm;
 import org.deidentifier.arx.benchmark.BenchmarkSetup.BenchmarkDataset;
 
 /**
- * @author Thierry
- *
- *         Used to perform Benchmarks on high dim datasets. Utility measurement
- *         is only performed once after reaching the final solution. Also
- *         capable of using local transformation.
+ * Benchmark class defining tests for high-dimensional datasets with local transformation.
+ * Utility measurement performed after predefined time limits.
  * 
+ * @author Thierry Meurers
  */
 public class BenchmarkExperiment2Local extends AbstractBenchmark {
 
+    /**
+     * Constructor
+     * 
+     * @param fileName
+     */
     BenchmarkExperiment2Local(String fileName) {
         super(fileName, true, false);
     }
 
+    /**
+     * Entry point.
+     * 
+     * @param args the arguments
+     */
     public static void main(String args[]) throws IOException {
         new BenchmarkExperiment2Local("results/Experiment3_popUnique.csv").start();
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void generateTestConfigurations(List<TestConfiguration> testConfigs) {
 
@@ -55,10 +66,8 @@ public class BenchmarkExperiment2Local extends AbstractBenchmark {
         
         int[] timeLimits = new int[] {500000, 1000000, 2000000, 3000000};
         
-        
         // Number of testruns
         int testRuns = 6;
-        
         
         // Configuration regarding the local transformation
         int localTransformationIterations = 100;
@@ -82,7 +91,6 @@ public class BenchmarkExperiment2Local extends AbstractBenchmark {
                         
                         testConfig.mutationProbability = 0.05;
                         testConfig.crossoverFraction = 0.4;
-
                         
                         if (useLocalTransformation) {
                             testConfig.gsFactor = 0d;
@@ -102,8 +110,7 @@ public class BenchmarkExperiment2Local extends AbstractBenchmark {
                             testConfig.timeLimit = timeLimit;
                         }
 
-                        // Just for warm-up (dont write to log and limit time to
-                        // 5s)
+                        // Just for warm-up (dont write to log and limit time to 5s)
                         if (testRun == 0) {
                             testConfig.writeToFile = false;
                             if (useLocalTransformation) {
@@ -119,5 +126,4 @@ public class BenchmarkExperiment2Local extends AbstractBenchmark {
             }
         }
     }
-
 }

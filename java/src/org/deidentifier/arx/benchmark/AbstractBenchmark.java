@@ -48,14 +48,128 @@ import org.deidentifier.arx.ARXPopulationModel.Region;
 
 import de.linearbits.subframe.Benchmark;
 
+/**
+ * Abstract class used to define a benchmark that systematically performs and logs 
+ * an arbitrary number of anonymization runs with varying parameters.
+ * 
+ * @author Thierry Meurers
+ *
+ */
 public abstract class AbstractBenchmark {
     
+    /**
+     * Privacy models available for testing
+     */
     protected enum PrivacyModel {
         K_ANONYMITY,
         POPULATION_UNIQUENESS
         }
 
-    // Column-names for log file
+    /**
+     * @author Thierry
+     *
+     * Class describing the executed anonymization run
+     */
+    class TestConfiguration{
+
+        /** Number of run */
+        int testRunNumber = -1;
+        /** Enable/disable logging */
+        boolean writeToFile = true;
+        
+        // Anonymization requirements and metrics
+        /** gsFactor */
+        double                 gsFactor                      = 0.5d;
+        
+        /** Aggregation function */
+        AggregateFunction      aggregateFunction             = AggregateFunction.ARITHMETIC_MEAN;
+        
+        /** Privacy model */
+        PrivacyModel           privacyModel                  = PrivacyModel.K_ANONYMITY;
+        
+        /** k for k-anonymity */
+        int                    k                             = 5;
+        
+        /** allowed supression */
+        double                 supression                    = 1d;
+        
+        /** flag indicating the transformation model */
+        boolean                useLocalTransformation        = false;
+        
+        /** max. number of iterations for local transformation */
+        int                    localTransformationIterations = 0;
+
+        /** Used algorithm */
+        AnonymizationAlgorithm algorithm;
+
+        // GA specific settings
+        /** Population size */
+        int                    subpopulationSize             = 100;
+        
+        /** Number of GA iterations */
+        int                    gaIterations                  = Integer.MAX_VALUE;
+
+        /** Elite fraction */
+        double                 eliteFraction                 = 0.2;
+
+        /** Crossover fraction */
+        double                 crossoverFraction             = 0.2;
+
+        /** Production fraction */
+        double                 productionFraction            = 0.2d;
+        
+        /** Mutation probability */
+        double                 mutationProbability           = 0.2;
+
+        /** Immigration interval */
+        int                    immigrationInterval           = 10;
+        
+        /** Immigration Fraction */
+        double                 immigrationFraction           = 0.2;
+
+        // Limits
+        /** Time limit */
+        int                    timeLimit                     = Integer.MAX_VALUE;
+        
+        /** Step limit */
+        int                    stepLimit                     = Integer.MAX_VALUE;
+        
+        /** Stop when optimal solution found */
+        boolean                limitByOptimalLoss            = false;
+
+        // Input configuration
+        /** Benchmark dataset */
+        BenchmarkDataset       dataset;
+        
+        /** Number of attributes included in anonymization */
+        int                    qids                          = 0;
+
+        /** Generates hash of dataset configuration */
+        Integer hashInputConfig() {
+            return (int) (dataset.hashCode() + qids);
+        }
+        
+        /** 
+         * Generates hash of input config.
+         * used to find testConfig in the optimal loss hashmap
+         * */
+        Integer hashObjective() {
+            return (int) (hashInputConfig() + k + supression);
+        }
+        
+        /**
+         * Outputs string to track the progress.
+         */
+        @Override
+        public String toString() {
+            String output = String.format("%s | %s | TimeLimit=%d | RunNumber=%d", algorithm, dataset, timeLimit, testRunNumber);
+            return output;
+        }
+    }
+    
+    /**
+     * Column-names for log file
+     */
     private static final Benchmark   BENCHMARK     = new Benchmark(new String[] { "algorithm",
                                                                                   "dataset",
                                                                                   "k",
@@ -72,21 +186,26 @@ public abstract class AbstractBenchmark {
                                                                                   "externalUtility",
                                                                                   "internalUtility" });
     
-    // log file handle
+    /**
+     * log file handle
+     */
     private File                     file;
     
-    // hash map to store the data obects (currently nur used)
-    private HashMap<Integer, Data>   inputDataHM   = new HashMap<Integer, Data>();
-    
-    // Stores the optimal solution (/loss) to avoid re-caclulating them
+    /**
+     * Stores the optimal solution (/loss) to avoid re-caclulating them
+     */
     private HashMap<Integer, Double> optimalLossHM = new HashMap<Integer, Double>();
     
-    // Enable / Disable console output
+    /**
+     * Enable / Disable console output
+     */
     private boolean                  verbose;
-    
-    // Enable / Disable progress (utility improvement) tracking
-    private boolean                  writeAllTrackedOptimums;
 
+    /**
+     * Enable / Disable progress (utility improvement) tracking
+     */
+    private boolean                  writeAllTrackedOptimums;
+    
     /**
      * Constructor.
      * 
@@ -107,147 +226,11 @@ public abstract class AbstractBenchmark {
     }
     
     /**
-     * Calls the generateTestConfigurations method and executes all provided
-     * TestConfigurations.
+     * Calculates the external utility of a list of transformations (contained in a TimeUtilityTuple) by searching the result's lattice.
      * 
-     * @throws IOException
+     * @param result ARX result (contains the lattice)
+     * @param tuTuples List of TimeUtilityTuples
      */
-    public void start() throws IOException {
-        List<TestConfiguration> testConfigurations = new ArrayList<TestConfiguration>();
-        generateTestConfigurations(testConfigurations); 
-        
-        for(int i = 0; i < testConfigurations.size(); i++) {
-            TestConfiguration testConfiguration = testConfigurations.get(i);
-            if(verbose) {
-                System.out.println(java.time.LocalTime.now() + " - (" + (i+1) +"/" + testConfigurations.size()+ ") " + testConfiguration);
-            }
-            executeTest(testConfiguration);
-        }
-    }
-    
-    /**
-     * This method is called by the Benchmarks start method. It requires the
-     * benchmark implementation to generate an arbitrary number of
-     * testConfigurations that will be processed during the Benchmark
-     * 
-     * @param testConfigurations
-     *            List to store the TestConfigurations
-     */
-    public abstract void generateTestConfigurations(List<TestConfiguration> testConfigurations);
-    
-    /**
-     * Method that executed a single anonymization process / test config.
-     * 
-     * @param testConfiguration config to be executed
-     * @throws IOException
-     */
-    private void executeTest(TestConfiguration testConfiguration) throws IOException {
-        
-        // reset lossLimit to avoid side effects
-        AbstractAlgorithm.lossLimit = -1;
-        
-        // Copy benchmark config to arx config
-        ARXConfiguration arxConfiguration = ARXConfiguration.create();
-        arxConfiguration.setQualityModel(Metric.createLossMetric(testConfiguration.gsFactor, testConfiguration.aggregateFunction));
-        //arxConfiguration.setQualityModel(Metric.createEntropyMetric(true, testConfiguration.aggregateFunction));
-        arxConfiguration.addPrivacyModel(instantiatePrivacyCriterion(testConfiguration));  
-        arxConfiguration.setSuppressionLimit(testConfiguration.supression);
-        arxConfiguration.setAlgorithm(testConfiguration.algorithm);
-        arxConfiguration.setGeneticAlgorithmIterations(testConfiguration.gaIterations);
-        arxConfiguration.setGeneticAlgorithmSubpopulationSize(testConfiguration.subpopulationSize);
-        arxConfiguration.setGeneticAlgorithmEliteFraction(testConfiguration.eliteFraction);
-        arxConfiguration.setGeneticAlgorithmCrossoverFraction(testConfiguration.crossoverFraction);
-        arxConfiguration.setGeneticAlgorithmMutationProbability(testConfiguration.mutationProbability);
-        arxConfiguration.setGeneticAlgorithmImmigrationFraction(testConfiguration.immigrationFraction);
-        arxConfiguration.setGeneticAlgorithmImmigrationInterval(testConfiguration.immigrationInterval);
-        arxConfiguration.setGeneticAlgorithmProductionFraction(testConfiguration.productionFraction);
-        arxConfiguration.setHeuristicSearchStepLimit(testConfiguration.stepLimit);
-        arxConfiguration.setHeuristicSearchTimeLimit(testConfiguration.timeLimit);
-
-        // find and set optimum as stop limit
-        if (testConfiguration.limitByOptimalLoss) {
-            findAndSetOptimum(testConfiguration);
-        }      
-        // load data
-        Data input = getInputData(testConfiguration);
-        
-        // Init and start anonymizer
-        ARXAnonymizer anonymizer = new ARXAnonymizer();
-        long time = System.currentTimeMillis();
-        ARXResult result = anonymizer.anonymize(input, arxConfiguration);
-        
-        DataHandle output = result.getOutput();
-        if (testConfiguration.useLocalTransformation && result.isResultAvailable()) {
-            try {
-                result.optimizeIterativeFast(output, 1d / (double) testConfiguration.localTransformationIterations);
-            } catch (RollbackRequiredException e) {
-                e.printStackTrace();
-                throw new RuntimeException(e);
-            }
-        }
-        
-        time = System.currentTimeMillis() - time;
-        
-        // write result
-        if (testConfiguration.writeToFile) {
-            
-            if (!writeAllTrackedOptimums) {
-            // write just the final result
-                
-                Double externalUtility = 0d;
-                if (result.isResultAvailable()) {
-                    externalUtility = output
-                            .getStatistics()
-                            .getQualityStatistics()
-                            .getGranularity()
-                            .getArithmeticMean();
-                    //utility = output.getStatistics().getQualityStatistics().getNonUniformEntropy().getArithmeticMean();
-                }
-                BENCHMARK.addRun(String.valueOf(testConfiguration.algorithm),
-                                 String.valueOf(testConfiguration.dataset),
-                                 String.valueOf(testConfiguration.k),
-                                 String.valueOf(testConfiguration.qids),
-                                 String.valueOf(testConfiguration.gaIterations),
-                                 String.valueOf(testConfiguration.eliteFraction),
-                                 String.valueOf(testConfiguration.crossoverFraction),
-                                 String.valueOf(testConfiguration.mutationProbability),
-                                 String.valueOf(testConfiguration.timeLimit),
-                                 String.valueOf(testConfiguration.stepLimit),
-                                 String.valueOf(testConfiguration.limitByOptimalLoss),
-                                 String.valueOf(testConfiguration.testRunNumber),
-                                 String.valueOf(time),
-                                 String.valueOf(externalUtility),
-                                 String.valueOf(0));
-                BENCHMARK.getResults().write(file);
-            } else {
-            // write all tracked optimums (does not work for local transformation)
-                List<TimeUtilityTuple> trackedOptimums = AbstractAlgorithm.getTrackedOptimums();
-                calculateUtilityForTransformation(result, trackedOptimums);
-                for (TimeUtilityTuple trackedOptimum : trackedOptimums) {
-                    BENCHMARK.addRun(String.valueOf(testConfiguration.algorithm),
-                                     String.valueOf(testConfiguration.dataset),
-                                     String.valueOf(testConfiguration.k),
-                                     String.valueOf(testConfiguration.qids),
-                                     String.valueOf(testConfiguration.gaIterations),
-                                     String.valueOf(testConfiguration.eliteFraction),
-                                     String.valueOf(testConfiguration.crossoverFraction),
-                                     String.valueOf(testConfiguration.mutationProbability),
-                                     String.valueOf(testConfiguration.timeLimit),
-                                     String.valueOf(testConfiguration.stepLimit),
-                                     String.valueOf(testConfiguration.limitByOptimalLoss),
-                                     String.valueOf(testConfiguration.testRunNumber),
-                                     String.valueOf(trackedOptimum.getTime()),
-                                     String.valueOf(trackedOptimum.getExternalUtility()),
-                                     String.valueOf(trackedOptimum.getInternalUtility()));
-                    BENCHMARK.getResults().write(file);
-
-                }
-            }
-        }
-        AbstractAlgorithm.getTrackedOptimums().clear();
-    }
-
-    
     private void calculateUtilityForTransformation(ARXResult result,
                                                    List<TimeUtilityTuple> tuTuples) {
         for (TimeUtilityTuple tuTuple : tuTuples) {
@@ -314,38 +297,115 @@ public abstract class AbstractBenchmark {
     }
     
     /**
-     * Simple method to load the input data using the BenchmarkSetup class.
+     * Method that executed a single anonymization process / test config.
      * 
-     * @param benchConfig configuration containing the dataset and qid information
-     * @return Input for the anonmyzation process
+     * @param testConfiguration config to be executed
      * @throws IOException
      */
-    private Data getInputData(TestConfiguration benchConfig) throws IOException {
+    private void executeTest(TestConfiguration testConfiguration) throws IOException {
+        
+        // reset lossLimit to avoid side effects
+        AbstractAlgorithm.lossLimit = -1;
+        
+        // Copy benchmark config to arx config
+        ARXConfiguration arxConfiguration = ARXConfiguration.create();
+        arxConfiguration.setQualityModel(Metric.createLossMetric(testConfiguration.gsFactor, testConfiguration.aggregateFunction));
+        arxConfiguration.addPrivacyModel(instantiatePrivacyCriterion(testConfiguration));  
+        arxConfiguration.setSuppressionLimit(testConfiguration.supression);
+        arxConfiguration.setAlgorithm(testConfiguration.algorithm);
+        arxConfiguration.setGeneticAlgorithmIterations(testConfiguration.gaIterations);
+        arxConfiguration.setGeneticAlgorithmSubpopulationSize(testConfiguration.subpopulationSize);
+        arxConfiguration.setGeneticAlgorithmEliteFraction(testConfiguration.eliteFraction);
+        arxConfiguration.setGeneticAlgorithmCrossoverFraction(testConfiguration.crossoverFraction);
+        arxConfiguration.setGeneticAlgorithmMutationProbability(testConfiguration.mutationProbability);
+        arxConfiguration.setGeneticAlgorithmImmigrationFraction(testConfiguration.immigrationFraction);
+        arxConfiguration.setGeneticAlgorithmImmigrationInterval(testConfiguration.immigrationInterval);
+        arxConfiguration.setGeneticAlgorithmProductionFraction(testConfiguration.productionFraction);
+        arxConfiguration.setHeuristicSearchStepLimit(testConfiguration.stepLimit);
+        arxConfiguration.setHeuristicSearchTimeLimit(testConfiguration.timeLimit);
 
-        int qids = benchConfig.qids;
-        if (qids == 0) {
-            qids = BenchmarkSetup.getQuasiIdentifyingAttributes(benchConfig.dataset).length;
-        }
-        return BenchmarkSetup.getData(benchConfig.dataset, qids);
-    }
-    
-    @Deprecated
-    // Broken idea as a Data object is changed when its used for anonymization
-    private Data getInputDataFromHashMap(TestConfiguration testConfiguration) throws IOException {
+        // find and set optimum as stop limit
+        if (testConfiguration.limitByOptimalLoss) {
+            findAndSetOptimum(testConfiguration);
+        }      
+        // load data
+        Data input = getInputData(testConfiguration);
         
-        Integer key = testConfiguration.hashInputConfig();
+        // Init and start anonymizer
+        ARXAnonymizer anonymizer = new ARXAnonymizer();
+        long time = System.currentTimeMillis();
+        ARXResult result = anonymizer.anonymize(input, arxConfiguration);
         
-        if(!inputDataHM.containsKey(key)) {
-            int qids = testConfiguration.qids;
-            if (qids == 0) {
-                qids = BenchmarkSetup.getQuasiIdentifyingAttributes(testConfiguration.dataset).length;
+        DataHandle output = result.getOutput();
+        if (testConfiguration.useLocalTransformation && result.isResultAvailable()) {
+            try {
+                result.optimizeIterativeFast(output, 1d / (double) testConfiguration.localTransformationIterations);
+            } catch (RollbackRequiredException e) {
+                e.printStackTrace();
+                throw new RuntimeException(e);
             }
-            System.out.println("Created new InputData (" + String.valueOf(testConfiguration.dataset) + " , qids=" + qids + ") with key " + key);
-            inputDataHM.put(key, BenchmarkSetup.getData(testConfiguration.dataset, qids));
         }
         
-        return inputDataHM.get(key);
+        time = System.currentTimeMillis() - time;
+        
+        // write result
+        if (testConfiguration.writeToFile) {
+            
+            if (!writeAllTrackedOptimums) {
+            // write just the final result
+                
+                Double externalUtility = 0d;
+                if (result.isResultAvailable()) {
+                    externalUtility = output
+                            .getStatistics()
+                            .getQualityStatistics()
+                            .getGranularity()
+                            .getArithmeticMean();
+                }
+                BENCHMARK.addRun(String.valueOf(testConfiguration.algorithm),
+                                 String.valueOf(testConfiguration.dataset),
+                                 String.valueOf(testConfiguration.k),
+                                 String.valueOf(testConfiguration.qids),
+                                 String.valueOf(testConfiguration.gaIterations),
+                                 String.valueOf(testConfiguration.eliteFraction),
+                                 String.valueOf(testConfiguration.crossoverFraction),
+                                 String.valueOf(testConfiguration.mutationProbability),
+                                 String.valueOf(testConfiguration.timeLimit),
+                                 String.valueOf(testConfiguration.stepLimit),
+                                 String.valueOf(testConfiguration.limitByOptimalLoss),
+                                 String.valueOf(testConfiguration.testRunNumber),
+                                 String.valueOf(time),
+                                 String.valueOf(externalUtility),
+                                 String.valueOf(0));
+                BENCHMARK.getResults().write(file);
+            } else {
+            // write all tracked optimums (does not work for local transformation)
+                List<TimeUtilityTuple> trackedOptimums = AbstractAlgorithm.getTrackedOptimums();
+                calculateUtilityForTransformation(result, trackedOptimums);
+                for (TimeUtilityTuple trackedOptimum : trackedOptimums) {
+                    BENCHMARK.addRun(String.valueOf(testConfiguration.algorithm),
+                                     String.valueOf(testConfiguration.dataset),
+                                     String.valueOf(testConfiguration.k),
+                                     String.valueOf(testConfiguration.qids),
+                                     String.valueOf(testConfiguration.gaIterations),
+                                     String.valueOf(testConfiguration.eliteFraction),
+                                     String.valueOf(testConfiguration.crossoverFraction),
+                                     String.valueOf(testConfiguration.mutationProbability),
+                                     String.valueOf(testConfiguration.timeLimit),
+                                     String.valueOf(testConfiguration.stepLimit),
+                                     String.valueOf(testConfiguration.limitByOptimalLoss),
+                                     String.valueOf(testConfiguration.testRunNumber),
+                                     String.valueOf(trackedOptimum.getTime()),
+                                     String.valueOf(trackedOptimum.getExternalUtility()),
+                                     String.valueOf(trackedOptimum.getInternalUtility()));
+                    BENCHMARK.getResults().write(file);
+
+                }
+            }
+        }
+        AbstractAlgorithm.getTrackedOptimums().clear();
     }
+
     
     /**
      * Method used to get the optimal solution for a given configuration. The
@@ -387,6 +447,31 @@ public abstract class AbstractBenchmark {
         AbstractAlgorithm.lossLimit = optimalLossHM.get(key);                         
     }
     
+    /**
+     * This method is called by the Benchmark's start method. It requires the
+     * benchmark implementation to generate an arbitrary number of
+     * testConfigurations that will be processed during the Benchmark
+     * 
+     * @param testConfigurations
+     *            List to store the TestConfigurations
+     */
+    public abstract void generateTestConfigurations(List<TestConfiguration> testConfigurations);
+    
+    /**
+     * Simple method to load the input data using the BenchmarkSetup class.
+     * 
+     * @param benchConfig configuration containing the dataset and qid information
+     * @return Input for the anonmyzation process
+     * @throws IOException
+     */
+    private Data getInputData(TestConfiguration benchConfig) throws IOException {
+
+        int qids = benchConfig.qids;
+        if (qids == 0) {
+            qids = BenchmarkSetup.getQuasiIdentifyingAttributes(benchConfig.dataset).length;
+        }
+        return BenchmarkSetup.getData(benchConfig.dataset, qids);
+    }
     
     /**
      * Used to instantiate the defined privacy criterion / model
@@ -404,67 +489,24 @@ public abstract class AbstractBenchmark {
         default:
             throw new RuntimeException("Unknown Privacy Model");
         }
-        
     }
     
     /**
-     * @author Thierry
-     *
-     * Class describing the executed / tested anonymization process
+     * Calls the generateTestConfigurations method and executes all provided
+     * TestConfigurations.
+     * 
+     * @throws IOException
      */
-    class TestConfiguration{
-
-        int testRunNumber = -1;
-        boolean writeToFile = true;
+    public void start() throws IOException {
+        List<TestConfiguration> testConfigurations = new ArrayList<TestConfiguration>();
+        generateTestConfigurations(testConfigurations); 
         
-        // Anonymization requirements and metrics
-        double                 gsFactor                      = 0.5d;
-        AggregateFunction      aggregateFunction             = AggregateFunction.ARITHMETIC_MEAN;
-        PrivacyModel           privacyModel                  = PrivacyModel.K_ANONYMITY;
-        int                    k                             = 5;
-        
-        double                 supression                    = 1d;
-        boolean                useLocalTransformation        = false;
-        int                    localTransformationIterations = 0;
-
-        // Used algorithm
-        AnonymizationAlgorithm algorithm;
-
-        // GA specific settings
-        int                    subpopulationSize             = 100;
-        int                    gaIterations                  = Integer.MAX_VALUE;
-        double                 eliteFraction                 = 0.2;
-        double                 crossoverFraction             = 0.2;
-        double                 mutationProbability           = 0.2;
-        double                 immigrationFraction           = 0.2;
-        double                 productionFraction            = 0.2d;
-        int                    immigrationInterval           = 10;
-
-        // Limits
-        int                    timeLimit                     = Integer.MAX_VALUE;
-        int                    stepLimit                     = Integer.MAX_VALUE;
-        boolean                limitByOptimalLoss            = false;
-
-        // Input configuration
-        BenchmarkDataset       dataset;
-        int                    qids                          = 0;
-
-        Integer hashInputConfig() {
-            return (int) (dataset.hashCode() + qids);
+        for(int i = 0; i < testConfigurations.size(); i++) {
+            TestConfiguration testConfiguration = testConfigurations.get(i);
+            if(verbose) {
+                System.out.println(java.time.LocalTime.now() + " - (" + (i+1) +"/" + testConfigurations.size()+ ") " + testConfiguration);
+            }
+            executeTest(testConfiguration);
         }
-        
-        // used to find testConfig in the optimal loss hashmap
-        Integer hashObjective() {
-            return (int) (hashInputConfig() + k + supression);
-        }
-        
-        @Override
-        public String toString() {
-            String output_raw = "%s | %s | TimeLimit=%d |  |RunNumber=%d";
-            String output = String.format("%s | %s | TimeLimit=%d | RunNumber=%d", algorithm, dataset, timeLimit, testRunNumber);
-            return output;
-        }
-
-    }
-    
+    }   
 }
